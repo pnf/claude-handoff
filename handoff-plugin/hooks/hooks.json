@@ -1,0 +1,15 @@
+{
+  "description": "Claude-Handoff hook for intelligent context transfer",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/user-prompt-submit.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
