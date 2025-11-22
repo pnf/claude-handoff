@@ -9,6 +9,9 @@ input=$(cat)
 session_id=$(echo "$input" | jq -r '.session_id')
 cwd=$(echo "$input" | jq -r '.cwd // "."')
 
+# Change to project directory
+cd "$cwd" || exit 0
+
 # Prompt Claude to analyze and generate handoff (use Haiku for speed)
 handoff=$(claude --resume "$session_id" --print --model haiku \
   "Analyze this conversation and create a focused handoff prompt for the next session.
