@@ -1,5 +1,5 @@
 {
-  "description": "Claude-Handoff hook for intelligent context transfer",
+  "description": "Claude-Handoff: Intelligent context transfer via /clear detection",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,6 +7,17 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/user-prompt-submit.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/session-start.sh"
           }
         ]
       }
