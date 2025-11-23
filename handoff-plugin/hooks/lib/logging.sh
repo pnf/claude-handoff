@@ -12,6 +12,8 @@
 #
 # TOGGLE LOGGING:
 #   Change LOGGING_ENABLED below to control ALL hook logging from one place.
+#   Can also set environment variable: export LOGGING_ENABLED=false
+#   Environment variable takes precedence if set.
 #
 # WHERE LOGS GO:
 #   /tmp/handoff-<hook-name>.log (fresh file on each hook invocation)
@@ -27,7 +29,10 @@ LOG_FILE=""
 init_logging() {
   local hook_name="${1:-unknown}"
 
-  if [[ "$LOGGING_ENABLED" != "true" ]]; then
+  # Environment variable takes precedence
+  local enabled="${LOGGING_ENABLED:-true}"
+
+  if [[ "$enabled" != "true" ]]; then
     # Logging disabled - create no-op log function
     log() { :; }
     return

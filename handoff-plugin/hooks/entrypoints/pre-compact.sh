@@ -7,8 +7,8 @@
 #
 # HOOK EVENT: PreCompact
 #   - Fires BEFORE compact operations (manual /compact)
-#   - Only activates when manual_instructions match "handoff:..." format
-#   - Receives: session_id, transcript_path, trigger, manual_instructions
+#   - Only activates when custom_instructions match "handoff:..." format
+#   - Receives: session_id, transcript_path, trigger, custom_instructions
 #
 # TESTING:
 #   1. Enable debug logging in hooks/lib/logging.sh (set LOGGING_ENABLED=true)
@@ -32,7 +32,7 @@
 #   /compact some other instructions  # No state file created
 #
 # MANUAL TESTING WITH FAKE INPUT:
-#   echo '{"session_id":"test-123","trigger":"manual","cwd":"'$(pwd)'","manual_instructions":"handoff:test goal"}' | bash pre-compact.sh
+#   echo '{"session_id":"test-123","trigger":"manual","cwd":"'$(pwd)'","custom_instructions":"handoff:test goal"}' | bash pre-compact.sh
 #   cat .git/handoff-pending/handoff-context.json
 #   rm -rf .git/handoff-pending  # cleanup
 #
@@ -54,7 +54,7 @@ input=$(cat)
 session_id=$(echo "$input" | jq -r '.session_id')
 trigger=$(echo "$input" | jq -r '.trigger // "auto"')
 cwd=$(echo "$input" | jq -r '.cwd // "."')
-manual_instructions=$(echo "$input" | jq -r '.manual_instructions // ""')
+manual_instructions=$(echo "$input" | jq -r '.custom_instructions // ""')
 
 log "Received input: session_id=$session_id trigger=$trigger cwd=$cwd manual_instructions=$manual_instructions"
 

@@ -7,14 +7,16 @@ Comprehensive test suite for the claude-handoff plugin using [Bats (Bash Automat
 ```
 tests/
 ├── unit/                  # Unit tests for individual hooks
-│   ├── pre-compact.bats  # Tests for PreCompact hook
-│   └── session-start.bats # Tests for SessionStart hook
-├── integration/          # Integration tests (future)
-├── fixtures/             # Test fixtures and mock data
-└── test_helper/          # Test helper modules
-    ├── bats-support/     # Bats support library (submodule)
-    ├── bats-assert/      # Bats assertion library (submodule)
-    ├── bats-file/        # Bats file assertion library (submodule)
+│   ├── pre-compact.bats   # Tests for PreCompact hook (10 tests)
+│   └── session-start.bats # Tests for SessionStart hook (10 tests)
+├── integration/           # Integration tests with mocked claude binary
+│   ├── handoff-success.bats # Success path tests (3 tests)
+│   └── handoff-errors.bats  # Error handling tests (5 tests)
+├── fixtures/              # Test fixtures and mock data
+└── test_helper/           # Test helper modules
+    ├── bats-support/      # Bats support library (submodule)
+    ├── bats-assert/       # Bats assertion library (submodule)
+    ├── bats-file/         # Bats file assertion library (submodule)
     ├── git-test-helpers.bash    # Git repo helpers
     └── json-assertions.bash     # JSON validation helpers
 ```
@@ -28,42 +30,52 @@ tests/
 ## Running Tests
 
 ```bash
-# Run all tests
-bats tests/unit/
+# Run all tests (unit + integration)
+bats tests/unit/*.bats tests/integration/*.bats
+
+# Run only unit tests
+bats tests/unit/*.bats
+
+# Run only integration tests
+bats tests/integration/*.bats
 
 # Run specific test file
 bats tests/unit/pre-compact.bats
 bats tests/unit/session-start.bats
+bats tests/integration/handoff-success.bats
+bats tests/integration/handoff-errors.bats
 
 # Run with verbose output
-bats --verbose-run tests/unit/
+bats --verbose-run tests/unit/*.bats
 
 # Run tests with TAP output
-bats --tap tests/unit/
+bats --tap tests/unit/*.bats
 
 # Filter by tags
 bats --filter-tags state-file tests/unit/
+bats --filter-tags critical tests/integration/
 ```
 
 ## Test Coverage
 
-### PreCompact Hook (`tests/unit/pre-compact.bats`)
+### PreCompact Hook - Unit Tests (`tests/unit/pre-compact.bats`)
 
 Tests the `pre-compact.sh` hook behavior:
 
 - ✅ State file creation with `handoff:` prefix
 - ✅ Skipping state file creation without `handoff:` prefix
-- ✅ Empty manual_instructions handling
+- ✅ Empty custom_instructions handling
 - ✅ Whitespace trimming after `handoff:` prefix
 - ✅ Missing field handling
 - ✅ Complex instruction text extraction
 - ✅ Fail-open behavior (always returns `continue:true`)
 - ✅ Directory creation
-- ✅ Edge cases (empty instructions after colon)
+- ✅ Edge case: empty instructions after colon
+- ✅ Edge case: `handoff:` in middle of string (should NOT trigger)
 
-**9 tests total**
+**10 tests total**
 
-### SessionStart Hook (`tests/unit/session-start.bats`)
+### SessionStart Hook - Unit Tests (`tests/unit/session-start.bats`)
 
 Tests the `session-start.sh` hook behavior:
 
@@ -77,6 +89,32 @@ Tests the `session-start.sh` hook behavior:
 - ✅ Null value handling
 
 **10 tests total**
+
+### Handoff Success - Integration Tests (`tests/integration/handoff-success.bats`)
+
+Tests the complete success path with mocked `claude` binary:
+
+- ✅ Returns valid JSON with `systemMessage` field
+- ✅ Cleans up state file and directory on success
+- ✅ `systemMessage` matches exact JSON schema
+
+**3 tests total**
+
+### Handoff Errors - Integration Tests (`tests/integration/handoff-errors.bats`)
+
+Tests error handling and retry logic with mocked failing `claude` binary:
+
+- ✅ Preserves state file when "No conversation found" error occurs
+- ✅ Preserves state file when `claude` exits with non-zero code
+- ✅ Preserves state file when `claude` returns empty output
+- ✅ Doesn't delete directory when preserving state for retry
+- ✅ Detects "No conversation found" string in mixed output
+
+**5 tests total**
+
+---
+
+**Total: 28 tests (20 unit + 8 integration)**
 
 ## Test Helpers
 

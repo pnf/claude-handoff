@@ -41,7 +41,7 @@ teardown() {
       session_id: $session,
       trigger: "manual",
       cwd: $cwd,
-      manual_instructions: "handoff:implement feature X"
+      custom_instructions: "handoff:implement feature X"
     }')
 
   # Run hook
@@ -78,7 +78,7 @@ teardown() {
       session_id: $session,
       trigger: "manual",
       cwd: $cwd,
-      manual_instructions: "some other instructions"
+      custom_instructions: "some other instructions"
     }')
 
   # Run hook
@@ -96,9 +96,9 @@ teardown() {
   assert_file_not_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
 }
 
-# Test 3: PreCompact with empty manual_instructions does NOT create state file
+# Test 3: PreCompact with empty custom_instructions does NOT create state file
 # bats test_tags=state-file,empty
-@test "should NOT create state file with empty manual_instructions" {
+@test "should NOT create state file with empty custom_instructions" {
   # Prepare input JSON
   local input=$(jq -n \
     --arg session "test-session-789" \
@@ -107,7 +107,7 @@ teardown() {
       session_id: $session,
       trigger: "manual",
       cwd: $cwd,
-      manual_instructions: ""
+      custom_instructions: ""
     }')
 
   # Run hook
@@ -132,7 +132,7 @@ teardown() {
       session_id: $session,
       trigger: "manual",
       cwd: $cwd,
-      manual_instructions: "handoff:   execute phase one"
+      custom_instructions: "handoff:   execute phase one"
     }')
 
   # Run hook
@@ -147,10 +147,10 @@ teardown() {
   assert_json_field_equals "$state_file" ".user_instructions" "execute phase one"
 }
 
-# Test 5: PreCompact with missing manual_instructions field
+# Test 5: PreCompact with missing custom_instructions field
 # bats test_tags=edge-case,missing-field
-@test "should handle missing manual_instructions field gracefully" {
-  # Prepare input JSON without manual_instructions
+@test "should handle missing custom_instructions field gracefully" {
+  # Prepare input JSON without custom_instructions
   local input=$(jq -n \
     --arg session "test-session-missing" \
     --arg cwd "$TEST_REPO" \
@@ -182,7 +182,7 @@ teardown() {
       session_id: $session,
       trigger: "manual",
       cwd: $cwd,
-      manual_instructions: "handoff: now implement this for teams as well, not just individual users"
+      custom_instructions: "handoff: now implement this for teams as well, not just individual users"
     }')
 
   # Run hook
@@ -231,7 +231,7 @@ teardown() {
       session_id: $session,
       trigger: "manual",
       cwd: $cwd,
-      manual_instructions: "handoff:test goal"
+      custom_instructions: "handoff:test goal"
     }')
 
   # Run hook
@@ -253,7 +253,7 @@ teardown() {
       session_id: $session,
       trigger: "manual",
       cwd: $cwd,
-      manual_instructions: "handoff:"
+      custom_instructions: "handoff:"
     }')
 
   # Run hook
@@ -266,4 +266,32 @@ teardown() {
   # User instructions should be empty string
   local state_file="$TEST_REPO/.git/handoff-pending/handoff-context.json"
   assert_json_field_equals "$state_file" ".user_instructions" ""
+}
+
+# Test 10: PreCompact with "handoff:" in MIDDLE of string should NOT trigger
+# bats test_tags=edge-case,pattern-matching,negative
+@test "should NOT trigger when handoff: appears in middle of string" {
+  # Prepare input JSON with "handoff:" NOT at start
+  local input=$(jq -n \
+    --arg session "test-session-middle" \
+    --arg cwd "$TEST_REPO" \
+    '{
+      session_id: $session,
+      trigger: "manual",
+      cwd: $cwd,
+      custom_instructions: "do something handoff:foo"
+    }')
+
+  # Run hook
+  run bash "$PRECOMPACT_HOOK" <<<"$input"
+  assert_success
+
+  # Verify output is valid JSON
+  assert_valid_json "$output"
+
+  # Verify continue:true
+  assert_json_field_equals "$output" ".continue" "true"
+
+  # Verify state file was NOT created (pattern requires ^handoff:)
+  assert_file_not_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
 }

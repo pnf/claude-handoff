@@ -90,6 +90,7 @@ log "State: session=$previous_session trigger=$trigger user_instructions=$user_i
 
 if [[ -z "$previous_session" ]]; then
   log "No previous_session, cleaning up"
+  # Only remove file, keep directory in case other state exists
   rm -f "$state_file"
   exit 0
 fi
@@ -117,8 +118,7 @@ Be ruthlessly selective. Omit anything not relevant to: $user_instructions
 
 Format as concise markdown. Start directly with \"## Handoff Context\" - no preamble about this being a handoff or mentioning the plugin."
 
-# Capture exit code and add timeout, redirect stderr to log
-# Set env var to prevent recursive hook invocation
+# Set env var to prevent recursive hook invocation during claude --resume
 handoff_exit_code=0
 handoff=$(HANDOFF_IN_PROGRESS=1 claude --resume "$previous_session" --model haiku --print \
   "$handoff_prompt") || handoff_exit_code=$?
@@ -133,7 +133,8 @@ if [[ $handoff_exit_code -ne 0 ]] || [[ -z "$handoff" ]] || [[ "$handoff" == *"N
   exit 0
 fi
 
-# Only cleanup state file on SUCCESS
+# Cleanup on SUCCESS: remove both file and directory
+# Directory removal attempts cleanup but won't fail if other files exist
 rm -f "$state_file"
 rmdir .git/handoff-pending 2>/dev/null || true
 
