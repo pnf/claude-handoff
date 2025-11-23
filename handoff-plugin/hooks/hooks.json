@@ -14,12 +14,13 @@
     ],
     "SessionStart": [
       {
+        "matcher": "*",
         "hooks": [
           {
-            "matcher": "compact",
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/session-start.sh",
-            "description": "Generate and inject handoff context after /compact"
+            "description": "Generate and inject handoff context after /compact",
+            "timeout": 60
           }
         ]
       }

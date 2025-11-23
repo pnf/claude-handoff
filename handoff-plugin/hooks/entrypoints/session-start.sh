@@ -50,12 +50,24 @@ exec 2>"$LOG_FILE"
 set -x
 echo "[$(date -Iseconds)] SessionStart hook triggered" >>"$LOG_FILE"
 
+# Prevent recursion: if we're already generating a handoff, exit immediately
+if [[ "${HANDOFF_IN_PROGRESS:-}" == "1" ]]; then
+  echo "[$(date -Iseconds)] Already in handoff generation, skipping to prevent recursion" >>"$LOG_FILE"
+  exit 0
+fi
+
 # Read hook input
 input=$(cat)
 cwd=$(echo "$input" | jq -r '.cwd // "."')
 source=$(echo "$input" | jq -r '.source // "unknown"')
 
 echo "[$(date -Iseconds)] Received input: cwd=$cwd source=$source" >>"$LOG_FILE"
+
+# Only proceed if this is a compact-triggered session start
+if [[ "$source" != "compact" ]]; then
+  echo "[$(date -Iseconds)] Source is '$source', not 'compact'. Exiting." >>"$LOG_FILE"
+  exit 0
+fi
 
 # Change to project directory
 cd "$cwd" || exit 0
@@ -86,8 +98,9 @@ fi
 echo "[$(date -Iseconds)] Invoking claude --resume $previous_session" >>"$LOG_FILE"
 
 # Capture exit code and add timeout, redirect stderr to log
+# Set env var to prevent recursive hook invocation
 handoff_exit_code=0
-handoff=$(timeout 90s claude --resume "$previous_session" --print --model haiku \
+handoff=$(HANDOFF_IN_PROGRESS=1 claude --resume "$previous_session" --model haiku --print \
   "The previous session was compacted (trigger: $trigger).
 Pay special attention to context that may have been lost in compaction.
 
@@ -121,12 +134,9 @@ rmdir .git/handoff-pending 2>/dev/null || true
 
 echo "[$(date -Iseconds)] Handoff generated successfully, returning additionalContext" >>"$LOG_FILE"
 
-# Return JSON with additionalContext
+# Return JSON with systemMessage to show in transcript
 jq -n --arg context "$handoff" '{
-  hookSpecificOutput: {
-    hookEventName: "SessionStart",
-    additionalContext: $context
-  }
+  systemMessage: $context
 }'
 
 exit 0
