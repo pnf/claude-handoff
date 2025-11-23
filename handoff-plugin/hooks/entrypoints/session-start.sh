@@ -57,10 +57,11 @@ fi
 
 # Read hook input
 input=$(cat)
+new_session_id=$(echo "$input" | jq -r '.session_id // ""')
 cwd=$(echo "$input" | jq -r '.cwd // "."')
 source=$(echo "$input" | jq -r '.source // "unknown"')
 
-log "Received input: cwd=$cwd source=$source"
+log "Received input: new_session_id=$new_session_id cwd=$cwd source=$source"
 
 # Only proceed if this is a compact-triggered session start
 if [[ "$source" != "compact" ]]; then
@@ -86,7 +87,23 @@ previous_session=$(cat "$state_file" | jq -r '.previous_session // ""')
 trigger=$(cat "$state_file" | jq -r '.trigger // ""')
 user_instructions=$(cat "$state_file" | jq -r '.user_instructions // ""')
 
-log "State: session=$previous_session trigger=$trigger user_instructions=$user_instructions"
+log "State: previous_session=$previous_session trigger=$trigger user_instructions=$user_instructions"
+
+# Defensive check: new session ID should differ from previous session ID
+if [[ -n "$new_session_id" ]] && [[ "$new_session_id" == "$previous_session" ]]; then
+  log "WARNING: Session ID collision detected!"
+  log "  new_session_id=$new_session_id"
+  log "  previous_session=$previous_session"
+  log "  This indicates a bug in compact mechanism or state corruption"
+  log "  Proceeding anyway (fail-open), but this should be investigated"
+fi
+
+# Validate previous_session format (should be a UUID)
+if [[ ! "$previous_session" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+  log "WARNING: previous_session does not match UUID format: $previous_session"
+  log "  Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  log "  This may indicate corrupted state or non-standard session ID"
+fi
 
 if [[ -z "$previous_session" ]]; then
   log "No previous_session, cleaning up"
@@ -99,22 +116,21 @@ fi
 log "Invoking claude --resume $previous_session"
 
 # Build handoff generation prompt with user instructions
-handoff_prompt="The previous session was compacted (trigger: $trigger).
+handoff_prompt="The current context window is about to be compacted.
 
-USER'S GOAL FOR THE NEW SESSION:
-$user_instructions
+Create a focused Handoff message for the next agent to immediately pick up where we left off. This Handoff will be used by the next agent to continue the most recent work related to the user's goal:
 
-Your task: Analyze the previous conversation and extract ONLY the context relevant to achieving the user's goal above.
+<user_instructions>
+  custom_instructions: $user_instructions
+</user_instructions>
 
-Create a focused handoff prompt that includes:
+Information to potentially include:
 
 1. **Context from previous session** - What we were working on that's relevant to the new goal
 2. **Key decisions/patterns** - Approaches, conventions, or constraints already established
 3. **Relevant files** - Paths to files that matter for the new goal (paths only)
 4. **Current state** - Where things were left that affects the new work
 5. **Blockers/dependencies** - Any issues or prerequisites the new session should know about
-
-Be ruthlessly selective. Omit anything not relevant to: $user_instructions
 
 Format as concise markdown. Start directly with \"## Handoff Context\" - no preamble about this being a handoff or mentioning the plugin."
 
