@@ -1,34 +1,25 @@
 {
-  "description": "Claude-Handoff: Intelligent context transfer via /clear detection",
+  "description": "Claude-Handoff: Intelligent context transfer via /compact detection",
   "hooks": {
-    "UserPromptSubmit": [
+    "PreCompact": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/debug-user-prompt-submit.sh"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "clear",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/session-end.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/pre-compact.sh",
+            "description": "Save session state before compact for handoff generation"
           }
         ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": "clear",
         "hooks": [
           {
+            "matcher": "compact",
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/session-start.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/entrypoints/session-start.sh",
+            "description": "Generate and inject handoff context after /compact"
           }
         ]
       }
