@@ -16,7 +16,7 @@
 #   - Cleans up state file after successful generation
 #
 # TESTING:
-#   1. Debug logging is enabled (see LOG_FILE below)
+#   1. Enable debug logging in hooks/lib/logging.sh (set LOGGING_ENABLED=true)
 #   2. Run /compact after some work
 #   3. Check logs:
 #        tail -f /tmp/handoff-sessionstart.log
@@ -44,15 +44,13 @@
 #
 set -euo pipefail
 
-# Debug logging - fresh log each run
-LOG_FILE="/tmp/handoff-sessionstart.log"
-exec 2>"$LOG_FILE"
-set -x
-echo "[$(date -Iseconds)] SessionStart hook triggered" >>"$LOG_FILE"
+# Load logging module
+source "${BASH_SOURCE%/*}/../lib/logging.sh"
+init_logging "sessionstart"
 
 # Prevent recursion: if we're already generating a handoff, exit immediately
 if [[ "${HANDOFF_IN_PROGRESS:-}" == "1" ]]; then
-  echo "[$(date -Iseconds)] Already in handoff generation, skipping to prevent recursion" >>"$LOG_FILE"
+  log "Already in handoff generation, skipping to prevent recursion"
   exit 0
 fi
 
@@ -61,11 +59,11 @@ input=$(cat)
 cwd=$(echo "$input" | jq -r '.cwd // "."')
 source=$(echo "$input" | jq -r '.source // "unknown"')
 
-echo "[$(date -Iseconds)] Received input: cwd=$cwd source=$source" >>"$LOG_FILE"
+log "Received input: cwd=$cwd source=$source"
 
 # Only proceed if this is a compact-triggered session start
 if [[ "$source" != "compact" ]]; then
-  echo "[$(date -Iseconds)] Source is '$source', not 'compact'. Exiting." >>"$LOG_FILE"
+  log "Source is '$source', not 'compact'. Exiting."
   exit 0
 fi
 
@@ -76,26 +74,26 @@ cd "$cwd" || exit 0
 state_file=".git/handoff-pending/handoff-context.json"
 
 if [[ ! -f "$state_file" ]]; then
-  echo "[$(date -Iseconds)] No state file found, exiting" >>"$LOG_FILE"
+  log "No state file found, exiting"
   exit 0
 fi
 
-echo "[$(date -Iseconds)] Found state file: $state_file" >>"$LOG_FILE"
+log "Found state file: $state_file"
 
 # Read handoff context
 previous_session=$(cat "$state_file" | jq -r '.previous_session // ""')
 trigger=$(cat "$state_file" | jq -r '.trigger // ""')
 
-echo "[$(date -Iseconds)] State: session=$previous_session trigger=$trigger" >>"$LOG_FILE"
+log "State: session=$previous_session trigger=$trigger"
 
 if [[ -z "$previous_session" ]]; then
-  echo "[$(date -Iseconds)] No previous_session, cleaning up" >>"$LOG_FILE"
+  log "No previous_session, cleaning up"
   rm -f "$state_file"
   exit 0
 fi
 
 # Generate handoff using claude --resume
-echo "[$(date -Iseconds)] Invoking claude --resume $previous_session" >>"$LOG_FILE"
+log "Invoking claude --resume $previous_session"
 
 # Capture exit code and add timeout, redirect stderr to log
 # Set env var to prevent recursive hook invocation
@@ -116,15 +114,15 @@ Include:
 Format as concise markdown. Be specific and actionable. Omit meta-discussion about creating this handoff.
 
 Ensure the user knows this was a result of the Claude-Handoff plugin system.
-" 2>>"$LOG_FILE") || handoff_exit_code=$?
+") || handoff_exit_code=$?
 
-echo "[$(date -Iseconds)] Claude exit code: $handoff_exit_code" >>"$LOG_FILE"
-echo "[$(date -Iseconds)] Handoff length: ${#handoff} chars" >>"$LOG_FILE"
+log "Claude exit code: $handoff_exit_code"
+log "Handoff length: ${#handoff} chars"
 
 # If handoff generation failed or is empty, exit silently WITHOUT cleanup
 # This keeps the state file for retry on next session start
 if [[ $handoff_exit_code -ne 0 ]] || [[ -z "$handoff" ]] || [[ "$handoff" == *"No conversation found"* ]]; then
-  echo "[$(date -Iseconds)] Handoff generation failed (exit: $handoff_exit_code), keeping state for retry" >>"$LOG_FILE"
+  log "Handoff generation failed (exit: $handoff_exit_code), keeping state for retry"
   exit 0
 fi
 
@@ -132,7 +130,7 @@ fi
 rm -f "$state_file"
 rmdir .git/handoff-pending 2>/dev/null || true
 
-echo "[$(date -Iseconds)] Handoff generated successfully, returning additionalContext" >>"$LOG_FILE"
+log "Handoff generated successfully, returning systemMessage"
 
 # Return JSON with systemMessage to show in transcript
 jq -n --arg context "$handoff" '{
