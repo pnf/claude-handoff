@@ -1,9 +1,11 @@
-# handoff-success.bats - Integration tests for successful handoff generation
+# handoff-success.bats - Integration tests for successful handoff injection
 #
-# Purpose: Test the complete success path including systemMessage output
-# Tests: Mock claude binary, verify JSON output format, verify cleanup
+# Purpose: Test the SessionStart hook injecting pre-generated handoff content
+# NOTE: This tests the NEW architecture where PreCompact generates content
+#       and SessionStart just injects it (no more claude --resume calls)
+# Tests: State file with handoff_content, systemMessage output, cleanup
 
-# bats file_tags=integration,success-path
+# bats file_tags=integration,success-path,fork-session-architecture
 
 # Load Bats libraries
 load '../test_helper/bats-support/load'
@@ -20,79 +22,45 @@ SESSIONSTART_HOOK="$BATS_TEST_DIRNAME/../../handoff-plugin/hooks/entrypoints/ses
 # Disable logging for tests
 export LOGGING_ENABLED=false
 
-# Setup: Create git test repo and mock claude binary
+# Setup: Create git test repo
 setup() {
   setup_test_repo
-
-  # Create mock claude binary that returns fake handoff content
-  MOCK_CLAUDE_DIR="$BATS_TEST_TMPDIR/mock-bin"
-  mkdir -p "$MOCK_CLAUDE_DIR"
-
-  cat >"$MOCK_CLAUDE_DIR/claude" <<'EOF'
-#!/usr/bin/env bash
-# Mock claude binary for testing
-
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --resume)
-      SESSION_ID="$2"
-      shift 2
-      ;;
-    --model)
-      shift 2
-      ;;
-    --print)
-      shift
-      ;;
-    *)
-      # This is the prompt
-      PROMPT="$1"
-      shift
-      ;;
-  esac
-done
-
-# Return fake handoff content
-cat <<'HANDOFF'
-## Handoff Context
-
-This is a focused handoff generated from the previous session.
-
-**Context**: Working on authentication feature
-**Files**: src/auth.ts, tests/auth.test.ts
-**Current state**: Basic login implemented, need OAuth integration
-**Blockers**: None
-HANDOFF
-
-exit 0
-EOF
-
-  chmod +x "$MOCK_CLAUDE_DIR/claude"
-
-  # Add mock claude to PATH
-  export PATH="$MOCK_CLAUDE_DIR:$PATH"
 }
 
-# Teardown: Clean up git repo and mock binary
+# Teardown: Clean up git repo
 teardown() {
   cleanup_test_repo
-  rm -rf "$MOCK_CLAUDE_DIR"
 }
 
 # Test 1: Success path returns valid JSON with systemMessage
 # bats test_tags=critical,success-path,systemMessage
 @test "should return valid JSON with systemMessage on success" {
-  # Create valid state file
+  # Create state file with PRE-GENERATED handoff content (as created by PreCompact)
   mkdir -p "$TEST_REPO/.git/handoff-pending"
+  local handoff_text="## Goal
+Implement OAuth integration for auth system
+
+## Relevant Context
+- Basic login already implemented
+- Need to add OAuth provider support
+- Using passport.js for auth
+
+## Key Details
+- src/auth.ts - main auth module
+- tests/auth.test.ts - test suite
+- Need to support GitHub and Google providers
+
+## Important Notes
+- Keep login flow backward compatible
+- OAuth tokens stored in secure session"
+
   jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
+    --arg content "$handoff_text" \
+    --arg goal "implement OAuth integration" \
     '{
-      previous_session: $session,
+      handoff_content: $content,
+      goal: $goal,
       trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "implement OAuth integration",
       type: "compact"
     }' \
     >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
@@ -101,7 +69,7 @@ teardown() {
   local input=$(jq -n \
     --arg cwd "$TEST_REPO" \
     '{
-      session_id: "new-session-success",
+      session_id: "abc123-continued",
       cwd: $cwd,
       source: "compact"
     }')
@@ -120,41 +88,37 @@ teardown() {
   has_system_message=$(echo "$output" | jq 'has("systemMessage")')
   assert_equal "$has_system_message" "true"
 
-  # systemMessage should not be empty
+  # systemMessage should contain the pre-generated handoff content
   local message_content
   message_content=$(echo "$output" | jq -r '.systemMessage')
-  refute [ -z "$message_content" ]
-
-  # systemMessage should contain expected handoff content
-  assert_output --partial "## Handoff Context"
-  assert_output --partial "authentication feature"
+  assert_regex "$message_content" "OAuth integration"
+  assert_regex "$message_content" "passport.js"
 }
 
 # Test 2: Success path cleans up state file and directory
 # bats test_tags=critical,cleanup
 @test "should clean up state file and directory on success" {
-  # Create valid state file
+  # Create state file with pre-generated content
   mkdir -p "$TEST_REPO/.git/handoff-pending"
   jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
+    --arg content "## Goal\nFix authentication bug\n## Context\n- Bug in OAuth flow" \
+    --arg goal "fix authentication bug" \
     '{
-      previous_session: $session,
+      handoff_content: $content,
+      goal: $goal,
       trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "fix bug",
       type: "compact"
     }' \
     >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
 
   # Verify state file exists
-  assert_file_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
+  assert_file_exists "$TEST_REPO/.git/handoff-pending/handoff-context.json"
 
   # Prepare input JSON
   local input=$(jq -n \
     --arg cwd "$TEST_REPO" \
     '{
-      session_id: "new-session-cleanup",
+      session_id: "xyz789-continued",
       cwd: $cwd,
       source: "compact"
     }')
@@ -163,27 +127,25 @@ teardown() {
   run bash "$SESSIONSTART_HOOK" <<<"$input"
   assert_success
 
-  # State file should be deleted
-  assert_file_not_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
+  # State file should be deleted after injection
+  assert_file_not_exists "$TEST_REPO/.git/handoff-pending/handoff-context.json"
 
-  # Directory should be deleted (or might remain if other files exist, hence 2>/dev/null || true)
-  # For this test, directory should be gone since we only had one file
-  assert_dir_not_exist "$TEST_REPO/.git/handoff-pending"
+  # Directory should be deleted (since we only had one file)
+  assert_dir_not_exists "$TEST_REPO/.git/handoff-pending"
 }
 
 # Test 3: Verify systemMessage JSON structure matches schema
 # bats test_tags=critical,schema-validation
 @test "should return systemMessage with exact JSON schema" {
-  # Create valid state file
+  # Create state file with pre-generated content
   mkdir -p "$TEST_REPO/.git/handoff-pending"
   jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
+    --arg content "## Goal\nSchema test\n## Context\nTest" \
+    --arg goal "test schema validation" \
     '{
-      previous_session: $session,
+      handoff_content: $content,
+      goal: $goal,
       trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "test goal",
       type: "compact"
     }' \
     >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
@@ -192,7 +154,7 @@ teardown() {
   local input=$(jq -n \
     --arg cwd "$TEST_REPO" \
     '{
-      session_id: "new-session-schema",
+      session_id: "schema-test-session",
       cwd: $cwd,
       source: "compact"
     }')
@@ -214,8 +176,13 @@ teardown() {
   key_name=$(echo "$output_json" | jq -r 'keys[0]')
   assert_equal "$key_name" "systemMessage"
 
-  # systemMessage value should be a string
+  # systemMessage value should be a string (the pre-generated handoff content)
   local message_type
   message_type=$(echo "$output_json" | jq -r '.systemMessage | type')
   assert_equal "$message_type" "string"
+
+  # systemMessage should contain the actual content we passed
+  local message_content
+  message_content=$(echo "$output_json" | jq -r '.systemMessage')
+  assert_regex "$message_content" "Schema test"
 }

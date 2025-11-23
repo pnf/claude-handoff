@@ -1,9 +1,11 @@
 # handoff-errors.bats - Integration tests for handoff error scenarios
 #
-# Purpose: Test error handling including "No conversation found" and retry logic
-# Tests: Mock failing claude binary, verify state file preservation for retry
+# Purpose: Test error handling and edge cases
+# NOTE: With new fork-session architecture, SessionStart has no external dependencies,
+#       so tests focus on missing/invalid state file handling
+# Tests: Missing state file, missing handoff_content, empty content
 
-# bats file_tags=integration,error-handling
+# bats file_tags=integration,error-handling,fork-session-architecture
 
 # Load Bats libraries
 load '../test_helper/bats-support/load'
@@ -23,150 +25,23 @@ export LOGGING_ENABLED=false
 # Setup: Create git test repo
 setup() {
   setup_test_repo
-  MOCK_CLAUDE_DIR="$BATS_TEST_TMPDIR/mock-bin"
-  mkdir -p "$MOCK_CLAUDE_DIR"
 }
 
 # Teardown: Clean up
 teardown() {
   cleanup_test_repo
-  rm -rf "$MOCK_CLAUDE_DIR"
 }
 
-# Test 1: "No conversation found" error preserves state file for retry
-# bats test_tags=critical,error-handling,retry
-@test "should preserve state file when claude returns 'No conversation found'" {
-  # Create mock claude that returns "No conversation found" error
-  cat >"$MOCK_CLAUDE_DIR/claude" <<'EOF'
-#!/usr/bin/env bash
-echo "Error: No conversation found for session ID: 550e8400-e29b-41d4-a716-446655440000"
-exit 1
-EOF
-  chmod +x "$MOCK_CLAUDE_DIR/claude"
-  export PATH="$MOCK_CLAUDE_DIR:$PATH"
-
-  # Create valid state file
-  mkdir -p "$TEST_REPO/.git/handoff-pending"
-  jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
-    '{
-      previous_session: $session,
-      trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "implement feature",
-      type: "compact"
-    }' \
-    >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
-
-  # Verify state file exists before running hook
-  assert_file_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
+# Test 1: No state file should exit silently
+# bats test_tags=critical,error-handling
+@test "should exit silently when no state file exists" {
+  # Do NOT create any state file
 
   # Prepare input JSON
   local input=$(jq -n \
     --arg cwd "$TEST_REPO" \
     '{
-      session_id: "new-session-not-found",
-      cwd: $cwd,
-      source: "compact"
-    }')
-
-  # Run hook
-  run bash "$SESSIONSTART_HOOK" <<<"$input"
-
-  # Should exit successfully (silent failure)
-  assert_success
-
-  # Should have no output (silent exit for retry)
-  assert_output ""
-
-  # State file should STILL EXIST (preserved for retry)
-  assert_file_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
-
-  # Verify state file content unchanged
-  assert_json_field_equals "$TEST_REPO/.git/handoff-pending/handoff-context.json" \
-    ".previous_session" "550e8400-e29b-41d4-a716-446655440000"
-}
-
-# Test 2: claude non-zero exit code preserves state file
-# bats test_tags=critical,error-handling,retry
-@test "should preserve state file when claude exits with non-zero code" {
-  # Create mock claude that exits with error
-  cat >"$MOCK_CLAUDE_DIR/claude" <<'EOF'
-#!/usr/bin/env bash
-echo "Error: Connection failed"
-exit 42
-EOF
-  chmod +x "$MOCK_CLAUDE_DIR/claude"
-  export PATH="$MOCK_CLAUDE_DIR:$PATH"
-
-  # Create valid state file
-  mkdir -p "$TEST_REPO/.git/handoff-pending"
-  jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
-    '{
-      previous_session: $session,
-      trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "test retry",
-      type: "compact"
-    }' \
-    >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
-
-  # Prepare input JSON
-  local input=$(jq -n \
-    --arg cwd "$TEST_REPO" \
-    '{
-      session_id: "new-session-exit-error",
-      cwd: $cwd,
-      source: "compact"
-    }')
-
-  # Run hook
-  run bash "$SESSIONSTART_HOOK" <<<"$input"
-
-  # Should exit successfully (silent failure)
-  assert_success
-
-  # Should have no output
-  assert_output ""
-
-  # State file should STILL EXIST
-  assert_file_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
-}
-
-# Test 3: Empty handoff output preserves state file
-# bats test_tags=critical,error-handling,retry
-@test "should preserve state file when claude returns empty output" {
-  # Create mock claude that returns empty output
-  cat >"$MOCK_CLAUDE_DIR/claude" <<'EOF'
-#!/usr/bin/env bash
-# Return nothing
-exit 0
-EOF
-  chmod +x "$MOCK_CLAUDE_DIR/claude"
-  export PATH="$MOCK_CLAUDE_DIR:$PATH"
-
-  # Create valid state file
-  mkdir -p "$TEST_REPO/.git/handoff-pending"
-  jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
-    '{
-      previous_session: $session,
-      trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "empty test",
-      type: "compact"
-    }' \
-    >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
-
-  # Prepare input JSON
-  local input=$(jq -n \
-    --arg cwd "$TEST_REPO" \
-    '{
-      session_id: "new-session-empty",
+      session_id: "test-session",
       cwd: $cwd,
       source: "compact"
     }')
@@ -180,80 +55,20 @@ EOF
   # Should have no output
   assert_output ""
 
-  # State file should STILL EXIST (preserved for retry)
-  assert_file_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
+  # Verify no state directory was created
+  assert_dir_not_exists "$TEST_REPO/.git/handoff-pending"
 }
 
-# Test 4: Verify error conditions don't delete directory either
-# bats test_tags=critical,cleanup-consistency
-@test "should not delete directory when preserving state file on error" {
-  # Create mock claude that fails
-  cat >"$MOCK_CLAUDE_DIR/claude" <<'EOF'
-#!/usr/bin/env bash
-exit 1
-EOF
-  chmod +x "$MOCK_CLAUDE_DIR/claude"
-  export PATH="$MOCK_CLAUDE_DIR:$PATH"
-
-  # Create valid state file
+# Test 2: Missing handoff_content in state file should exit silently
+# bats test_tags=critical,error-handling
+@test "should exit silently when handoff_content missing from state file" {
+  # Create state file WITHOUT handoff_content (old format or corrupted)
   mkdir -p "$TEST_REPO/.git/handoff-pending"
   jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
+    --arg goal "test goal" \
     '{
-      previous_session: $session,
+      goal: $goal,
       trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "directory test",
-      type: "compact"
-    }' \
-    >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
-
-  # Verify directory exists
-  assert_dir_exist "$TEST_REPO/.git/handoff-pending"
-
-  # Prepare input JSON
-  local input=$(jq -n \
-    --arg cwd "$TEST_REPO" \
-    '{
-      session_id: "new-session-dir-test",
-      cwd: $cwd,
-      source: "compact"
-    }')
-
-  # Run hook
-  run bash "$SESSIONSTART_HOOK" <<<"$input"
-  assert_success
-
-  # Both file AND directory should still exist
-  assert_file_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
-  assert_dir_exist "$TEST_REPO/.git/handoff-pending"
-}
-
-# Test 5: Specific test for "No conversation found" string matching
-# bats test_tags=critical,string-matching
-@test "should detect 'No conversation found' in claude output regardless of case" {
-  # Create mock claude that returns the error mixed into other output
-  cat >"$MOCK_CLAUDE_DIR/claude" <<'EOF'
-#!/usr/bin/env bash
-echo "Searching for session..."
-echo "No conversation found for the specified session ID"
-echo "Please check your session ID and try again"
-exit 0
-EOF
-  chmod +x "$MOCK_CLAUDE_DIR/claude"
-  export PATH="$MOCK_CLAUDE_DIR:$PATH"
-
-  # Create valid state file
-  mkdir -p "$TEST_REPO/.git/handoff-pending"
-  jq -n \
-    --arg session "550e8400-e29b-41d4-a716-446655440000" \
-    --arg cwd "$TEST_REPO" \
-    '{
-      previous_session: $session,
-      trigger: "manual",
-      cwd: $cwd,
-      user_instructions: "string match test",
       type: "compact"
     }' \
     >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
@@ -262,7 +77,7 @@ EOF
   local input=$(jq -n \
     --arg cwd "$TEST_REPO" \
     '{
-      session_id: "new-session-string-match",
+      session_id: "test-session-2",
       cwd: $cwd,
       source: "compact"
     }')
@@ -270,12 +85,87 @@ EOF
   # Run hook
   run bash "$SESSIONSTART_HOOK" <<<"$input"
 
-  # Should exit successfully (detected error)
+  # Should exit successfully
   assert_success
 
-  # Should have no output (silent failure for retry)
+  # Should have no output
   assert_output ""
 
-  # State file should be preserved
-  assert_file_exist "$TEST_REPO/.git/handoff-pending/handoff-context.json"
+  # State file should still exist (didn't remove it in case of other state)
+  assert_file_exists "$TEST_REPO/.git/handoff-pending/handoff-context.json"
+}
+
+# Test 3: Empty handoff_content should exit silently
+# bats test_tags=critical,error-handling
+@test "should exit silently when handoff_content is empty" {
+  # Create state file with empty handoff_content
+  mkdir -p "$TEST_REPO/.git/handoff-pending"
+  jq -n \
+    --arg content "" \
+    --arg goal "test goal" \
+    '{
+      handoff_content: $content,
+      goal: $goal,
+      trigger: "manual",
+      type: "compact"
+    }' \
+    >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
+
+  # Prepare input JSON
+  local input=$(jq -n \
+    --arg cwd "$TEST_REPO" \
+    '{
+      session_id: "test-session-3",
+      cwd: $cwd,
+      source: "compact"
+    }')
+
+  # Run hook
+  run bash "$SESSIONSTART_HOOK" <<<"$input"
+
+  # Should exit successfully
+  assert_success
+
+  # Should have no output
+  assert_output ""
+
+  # State file should still exist (didn't clean up for safety)
+  assert_file_exists "$TEST_REPO/.git/handoff-pending/handoff-context.json"
+}
+
+# Test 4: Non-"compact" source should be ignored
+# bats test_tags=critical,filtering
+@test "should ignore non-compact source and exit silently" {
+  # Create state file (shouldn't matter)
+  mkdir -p "$TEST_REPO/.git/handoff-pending"
+  jq -n \
+    --arg content "test content" \
+    '{
+      handoff_content: $content,
+      goal: "test",
+      trigger: "manual",
+      type: "compact"
+    }' \
+    >"$TEST_REPO/.git/handoff-pending/handoff-context.json"
+
+  # Prepare input JSON with source != "compact"
+  local input=$(jq -n \
+    --arg cwd "$TEST_REPO" \
+    '{
+      session_id: "test-session-4",
+      cwd: $cwd,
+      source: "manual"
+    }')
+
+  # Run hook
+  run bash "$SESSIONSTART_HOOK" <<<"$input"
+
+  # Should exit successfully
+  assert_success
+
+  # Should have no output
+  assert_output ""
+
+  # State file should NOT be cleaned up (didn't process handoff)
+  assert_file_exists "$TEST_REPO/.git/handoff-pending/handoff-context.json"
 }
