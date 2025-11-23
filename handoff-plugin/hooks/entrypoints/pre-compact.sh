@@ -80,37 +80,37 @@ mkdir -p .git/handoff-pending
 log "Forking session $session_id to generate handoff context..."
 
 # Build handoff extraction prompt
-handoff_prompt="You are analyzing a conversation to generate a focused handoff summary for the next session.
+handoff_prompt="Context window compaction imminent. You are analyzing the current to generate a focused Handoff for the next session.
 
-**User's Goal for Next Session:**
-$user_instructions
+Create a focused Handoff message for the next agent to immediately pick up where we left off. This Handoff will be used by the next agent to continue the most recent work related to the user's goal:
 
-**Your Task:**
-Extract ONLY the context relevant to achieving this specific goal. Be ruthlessly selective - include only:
-1. Technical decisions made that affect this goal
-2. Code patterns or architecture relevant to this goal
-3. Blockers, constraints, or important discoveries
-4. Specific files, functions, or components mentioned
+<user_instructions>
+  custom_instructions: $user_instructions
+</user_instructions>
 
-**Format:**
+Information to potentially include:
+
+1. **Context from previous session** - What we were working on that's relevant to the new goal
+2. **Key decisions/patterns** - Approaches, conventions, or constraints already established
+3. **Relevant files** - Paths to files that matter for the new goal (paths only)
+4. **Current state** - Where things were left that affects the new work
+5. **Blockers/dependencies** - Any issues or prerequisites the new session should know about
+
 Return a concise markdown summary (max 500 words) structured as:
-## Goal
-[Restate the user's goal]
 
-## Relevant Context
-[Bullet points of relevant technical context]
+<format>
+  ## Immediate Handoff
+  [Restate the immediate next steps]
 
-## Key Details
-[Specific implementation details, file paths, function names]
+  ## Relevant Context
+  [Bullet points of relevant technical context]
 
-## Important Notes
-[Warnings, blockers, or critical information]
+  ## Key Details
+  [Specific implementation details, file paths, function names, shell commands]
 
-Do NOT include:
-- Generic project information
-- Unrelated technical discussions
-- Process/workflow details
-- Tangential context"
+  ## Important Notes
+  [Warnings, blockers, or critical information]
+</format>"
 
 # Fork the current session and generate goal-focused handoff content
 # --fork-session creates a snapshot without affecting original session
