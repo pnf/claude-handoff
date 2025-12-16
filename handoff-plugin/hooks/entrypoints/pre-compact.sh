@@ -80,37 +80,59 @@ mkdir -p .git/handoff-pending
 log "Forking session $session_id to generate handoff context..."
 
 # Build handoff extraction prompt
-handoff_prompt="Context window compaction imminent. You are analyzing the current to generate a focused Handoff for the next session.
+handoff_prompt="You are generating a goal-focused Handoff for the next session. Context compaction is imminent.
 
-Create a focused Handoff message for the next agent to immediately pick up where we left off. This Handoff will be used by the next agent to continue the most recent work related to the user's goal:
+<goal>
+$user_instructions
+</goal>
 
-<user_instructions>
-  custom_instructions: $user_instructions
-</user_instructions>
+Your task: Extract ONLY the context from this session that the next agent needs to execute the goal above. Be ruthlessly selective—irrelevant context is worse than missing context.
 
-Information to potentially include:
+Before providing your handoff, analyze the conversation in <analysis> tags:
 
-1. **Context from previous session** - What we were working on that's relevant to the new goal
-2. **Key decisions/patterns** - Approaches, conventions, or constraints already established
-3. **Relevant files** - Paths to files that matter for the new goal (paths only)
-4. **Current state** - Where things were left that affects the new work
-5. **Blockers/dependencies** - Any issues or prerequisites the new session should know about
+1. Restate the goal in your own words
+2. Chronologically scan the session for information relevant to THIS GOAL:
+   - Decisions, patterns, or constraints that affect the goal
+   - Files modified or examined that relate to the goal
+   - Errors encountered and how they were resolved
+   - Current state of work that impacts the goal
+3. Explicitly list what you are EXCLUDING and why
+4. Verify: Does every item you're including directly serve the goal?
 
-Return a concise markdown summary (max 500 words) structured as:
+<analysis>
+[Your systematic analysis here]
+</analysis>
 
-<format>
-  ## Immediate Handoff
-  [Restate the immediate next steps]
+Then provide your handoff in this exact structure:
 
-  ## Relevant Context
-  [Bullet points of relevant technical context]
+<handoff>
+## Goal
+[Restate the goal as a clear, actionable directive]
 
-  ## Key Details
-  [Specific implementation details, file paths, function names, shell commands]
+## Relevant Context
+[3-7 bullet points of technical context that directly enables the goal]
+[Each bullet must pass the test: \"The next agent cannot execute the goal without knowing this\"]
 
-  ## Important Notes
-  [Warnings, blockers, or critical information]
-</format>"
+## Key Details
+[Specific implementation details: file paths, function names, commands, error messages]
+[Use exact names and paths—no paraphrasing]
+
+## Warnings
+[Blockers, gotchas, or critical constraints]
+[Omit this section entirely if nothing applies]
+</handoff>
+
+Constraints:
+- Maximum 400 words in the <handoff> section
+- File paths only, not full code snippets (the agent can read files)
+- Include verbatim quotes for anything where paraphrasing risks drift
+- If the goal is unclear or disconnected from session context, say so explicitly in your analysis and provide best-effort handoff
+
+Do not:
+- Include context \"just in case\" it might be useful
+- Summarize the full session—that's not your job
+- Invent next steps beyond what the goal specifies
+- Include resolved issues unless they inform the goal"
 
 # Fork the current session and generate goal-focused handoff content
 # --fork-session creates a snapshot without affecting original session
