@@ -1,6 +1,6 @@
 {
   "name": "claude-handoff",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Replace /compact with intelligent context transfer - analyzes current thread and generates focused prompts for new threads based on your goal",
   "author": {
     "name": "Kyle Snow Schwartz",

@@ -138,21 +138,29 @@ Do not:
 # --fork-session creates a snapshot without affecting original session
 # --model haiku for speed and cost
 # --print for headless execution
+#
+# IMPORTANT: Write output directly to temp file to avoid bash variable expansion
+# corrupting content (backticks, $(), globs, null bytes all break variable capture)
 handoff_exit_code=0
-handoff_content=$(claude --resume "$session_id" --fork-session --model haiku --print "$handoff_prompt") || handoff_exit_code=$?
+temp_content=$(mktemp)
+trap "rm -f '$temp_content'" EXIT
+
+claude --resume "$session_id" --fork-session --model haiku --print "$handoff_prompt" >"$temp_content" || handoff_exit_code=$?
 
 # Check if handoff generation succeeded
-if [[ $handoff_exit_code -ne 0 ]] || [[ -z "$handoff_content" ]]; then
+if [[ $handoff_exit_code -ne 0 ]] || [[ ! -s "$temp_content" ]]; then
   log "ERROR: Failed to generate handoff content (exit code: $handoff_exit_code)"
   jq -n '{continue: true, suppressOutput: true}'
   exit 0
 fi
 
-log "Successfully generated handoff content (${#handoff_content} chars)"
+content_size=$(wc -c <"$temp_content" | tr -d ' ')
+log "Successfully generated handoff content ($content_size bytes)"
 
 # Save generated handoff content for SessionStart to inject
+# Use --rawfile so jq reads file directly (bypasses bash variable expansion)
 jq -n \
-  --arg content "$handoff_content" \
+  --rawfile content "$temp_content" \
   --arg goal "$user_instructions" \
   --arg trigger "$trigger" \
   '{
