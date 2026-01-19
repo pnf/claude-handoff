@@ -3,11 +3,13 @@
 #
 # PURPOSE:
 #   Generates goal-focused handoff content when user runs `/compact handoff:<instructions>`
-#   by forking current session and extracting relevant context immediately.
+#   or `/compact handoff!<instructions>` by forking current session and extracting relevant
+#   context immediately. Using "handoff!" also saves the content to HANDOFF.md.
 #
 # HOOK EVENT: PreCompact
 #   - Fires BEFORE compact operations (manual /compact)
-#   - Only activates when custom_instructions match "handoff:..." format
+#   - Only activates when custom_instructions match "handoff:..." or "handoff!..." format
+#   - "handoff!" also saves the handoff to HANDOFF.md in the current directory
 #   - Receives: session_id, transcript_path, trigger, custom_instructions
 #
 # ARCHITECTURE:
@@ -19,11 +21,13 @@
 #   1. Enable debug logging in hooks/lib/logging.sh (set LOGGING_ENABLED=true)
 #   2. Start a conversation, add substantial context (multiple tool uses)
 #   3. Run: /compact handoff:now implement feature X
+#      Or: /compact handoff!now implement feature X  (also saves to HANDOFF.md)
 #   4. Check logs:
 #        tail -f /tmp/handoff-precompact.log
 #   5. Verify state file created with handoff_content:
 #        cat .git/handoff-pending/handoff-context.json
-#   6. Expected state file structure:
+#   6. If using "handoff!", also verify: cat HANDOFF.md
+#   7. Expected state file structure:
 #        {
 #          "handoff_content": "<generated handoff markdown>",
 #          "goal": "now implement feature X",
@@ -57,15 +61,21 @@ manual_instructions=$(echo "$input" | jq -r '.custom_instructions // ""')
 
 log "Received input: session_id=$session_id trigger=$trigger cwd=$cwd manual_instructions=$manual_instructions"
 
-# Only proceed if manual instructions match "handoff:..." format
-if [[ ! "$manual_instructions" =~ ^handoff: ]]; then
-  log "Manual instructions don't match 'handoff:' pattern, skipping handoff"
+# Only proceed if manual instructions match "handoff:" or "handoff!" format
+if [[ ! "$manual_instructions" =~ ^handoff[:!] ]]; then
+  log "Manual instructions don't match 'handoff:' or 'handoff!' pattern, skipping handoff"
   jq -n '{continue: true, suppressOutput: true}'
   exit 0
 fi
 
-# Extract user instructions after "handoff:" prefix
-user_instructions="${manual_instructions#handoff:}"
+# Determine separator and extract user instructions
+if [[ "$manual_instructions" =~ ^handoff! ]]; then
+  separator="!"
+  user_instructions="${manual_instructions#handoff!}"
+else
+  separator=":"
+  user_instructions="${manual_instructions#handoff:}"
+fi
 # Trim leading whitespace
 user_instructions="${user_instructions#"${user_instructions%%[![:space:]]*}"}"
 
@@ -156,6 +166,12 @@ fi
 
 content_size=$(wc -c <"$temp_content" | tr -d ' ')
 log "Successfully generated handoff content ($content_size bytes)"
+
+# If using handoff! syntax, copy content to HANDOFF.md in current directory
+if [[ "$separator" == "!" ]]; then
+  cp "$temp_content" "$cwd/HANDOFF.md"
+  log "Copied handoff content to HANDOFF.md"
+fi
 
 # Save generated handoff content for SessionStart to inject
 # Use --rawfile so jq reads file directly (bypasses bash variable expansion)
